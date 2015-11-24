@@ -257,9 +257,7 @@ trait ElasticquentTrait
             $params['body']['query'] = ['match_all' => []];
         }
 
-        $result = $instance->getElasticSearchClient()->search($params);
-
-        return new ResultCollection($result, $instance = new static);
+        return collect($instance->getElasticSearchClient()->search($params));
     }
 
     /**
