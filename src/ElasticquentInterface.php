@@ -75,6 +75,7 @@ interface ElasticquentInterface
     /**
      * Search a Type
      *
+     * @param array $query
      *
      * @return void
      */
@@ -113,7 +114,7 @@ interface ElasticquentInterface
      * @param     bool $getIdIfPossible
      * @return    array
      */
-    function getBasicEsParams($getIdIfPossible = true);
+    function getBasicEsParams();
 
      /**
      * Is Elasticsearch Document
@@ -139,23 +140,6 @@ interface ElasticquentInterface
      * @return
      */
     public static function putMapping($ignoreConflicts = false);
-
-    /**
-     * Delete Mapping
-     *
-     * @return
-     */
-    public static function deleteMapping();
-
-    /**
-     * Rebuild Mapping
-     *
-     * This will delete and then re-add
-     * the mapping for this model.
-     *
-     * @return
-     */
-    public static function rebuildMapping();
 
     /**
      * Get Mapping

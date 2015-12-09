@@ -1,5 +1,6 @@
 <?php namespace Elasticquent;
 
+use Carbon\Carbon;
 use \Elasticquent\ElasticquentCollection as ElasticquentCollection;
 use \Elasticquent\ElasticquentResultCollection as ResultCollection;
 
@@ -47,6 +48,8 @@ trait ElasticquentTrait
      */
     protected $documentVersion = null;
 
+    protected $index = null;
+
     /**
      * Get ElasticSearch Client
      *
@@ -60,7 +63,7 @@ trait ElasticquentTrait
             $config = \Config::get('elasticquent.config');
         }
 
-        return new \Elasticsearch\Client($config);
+        return \Elasticsearch\ClientBuilder::fromConfig($config, true);
     }
 
     /**
@@ -249,7 +252,7 @@ trait ElasticquentTrait
     {
         $instance = new static;
 
-        $params = $instance->getBasicEsParams(true, true, true, $limit, $offset);
+        $params = $instance->getBasicEsParams('read', true, true, $limit, $offset);
 
         if ($query) {
             $params['body'] = $query;
@@ -257,7 +260,9 @@ trait ElasticquentTrait
             $params['body']['query'] = ['match_all' => []];
         }
 
-        return collect($instance->getElasticSearchClient()->search($params));
+        $result = $instance->getElasticSearchClient()->search($params);
+        $result['query'] = json_encode($query);
+        return collect($result);
     }
 
     /**
@@ -293,7 +298,8 @@ trait ElasticquentTrait
             throw new Exception('Document does not exist.');
         }
 
-        $params = $this->getBasicEsParams();
+        $params = $this->getBasicEsParams('write');
+
 
         $includeFields = $this->getIndexDocumentData();
         $excludeFields = $this->excludeIndexDocumentData();
@@ -324,7 +330,8 @@ trait ElasticquentTrait
      */
     public function removeFromIndex()
     {
-        return $this->getElasticSearchClient()->delete($this->getBasicEsParams());
+        $params = $this->getBasicEsParams('write');
+        return $this->getElasticSearchClient()->delete($params);
     }
 
     /**
@@ -346,7 +353,7 @@ trait ElasticquentTrait
      * Most Elasticsearch API calls need the index and
      * type passed in a parameter array.
      *
-     * @param     bool $getIdIfPossible
+     * @param     string $indexType
      * @param     bool $getSourceIfPossible
      * @param     bool $getTimestampIfPossible
      * @param     int $limit
@@ -354,16 +361,12 @@ trait ElasticquentTrait
      *
      * @return    array
      */
-    public function getBasicEsParams($getIdIfPossible = true, $getSourceIfPossible = false, $getTimestampIfPossible = false, $limit = null, $offset = null)
+    public function getBasicEsParams($indexType = 'read', $getSourceIfPossible = false, $getTimestampIfPossible = false, $limit = null, $offset = null)
     {
         $params = array(
-            'index'     => $this->getIndexName(),
+            'index'     => $this->getIndexName() . '_' . $indexType,
             'type'      => $this->getTypeName()
         );
-
-        if ($getIdIfPossible and $this->getKey()) {
-            $params['id'] = $this->getKey();
-        }
 
         $fieldsParam = array();
 
@@ -428,81 +431,190 @@ trait ElasticquentTrait
     {
         $instance = new static;
 
-        $mapping = $instance->getBasicEsParams();
-
         $params = array(
-            '_source'       => array('enabled' => true),
-            'properties'    => $instance->getMappingProperties()
+            'index'         => $instance->getIndexName() . '_write',
+            'type'          => $instance->getTypeName(),
+            'body'          => [
+                'properties'    => $instance->getMappingProperties()
+            ]
         );
 
-        $mapping['body'][$instance->getTypeName()] = $params;
-
-        return $instance->getElasticSearchClient()->indices()->putMapping($mapping);
+        return $instance->getElasticSearchClient()->indices()->putMapping($params);
     }
 
     /**
-     * Delete Mapping
-     *
-     * @return array
-     */
-    public static function deleteMapping()
-    {
-        $instance = new static;
-
-        $params = $instance->getBasicEsParams();
-
-        return $instance->getElasticSearchClient()->indices()->deleteMapping($params);
-    }
-
-    /**
-     * Rebuild Mapping
+     * Rebuild Mapping with zero downtime
      *
      * This will delete and then re-add
      * the mapping for this model.
      *
+     * @param bool $seamless
+     *
      * @return array
      */
-    public static function rebuildMapping()
+    public static function rebuildIndex()
     {
         $instance = new static;
-
-        // If the mapping exists, let's delete it.
-        if ($instance->mappingExists()) {
-            $instance->deleteMapping();
-        }
-
-        // Don't need ignore conflicts because if we
-        // just removed the mapping there shouldn't
-        // be any conflicts.
-        return $instance->putMapping();
+        $instance->createIndex(false);
+        $instance->putMapping();
     }
 
     /**
      * Create Index
      *
+     * @param bool $new
+     * @param bool $seamless
      * @param int $shards
      * @param int $replicas
      * @return array
      */
-    public static function createIndex($shards = null, $replicas = null)
+    public static function createIndex($new = true, $shards = 1, $replicas = 0)
+    {
+        $instance = new static;
+        $client = $instance->getElasticSearchClient();
+        $timestamp = time();
+        $base = $instance->getIndexName();
+        $index = [
+            'name' => $base . '_' . $timestamp,
+            'read' => $base . '_read',
+            'write' => $base . '_write'
+        ];
+
+        $params = array(
+            'index'     => $index['name']
+        );
+
+
+        $params['body']['settings']['number_of_shards'] = $shards;
+        $params['body']['settings']['number_of_replicas'] = $replicas;
+
+        $client->indices()->create($params);
+        if ($new) {
+            $instance->createAlias($index['read'], $index['name']);
+            $instance->createAlias($index['write'], $index['name']);
+        } else {
+            $instance->updateAlias($index['write'], $index['name']);
+        }
+        $instance->putMapping();
+    }
+
+
+    /**
+     * Get the index name from an alias
+     *
+     * @param $alias
+     * @return mixed
+     */
+    public static function getIndex($alias) {
+        $instance = new static;
+        $client = $instance->getElasticSearchClient();
+
+        $params = [
+            'index' => $alias
+        ];
+
+        return collect($client->indices()->get($params))->keys()[0];
+    }
+
+    /**
+     * Delete Index
+     *
+     * @param string $index
+     * @return array
+     */
+    public static function deleteIndex($index)
     {
         $instance = new static;
 
         $client = $instance->getElasticSearchClient();
 
-        $index = array(
-            'index'     => $instance->getIndexName()
-        );
+        $params = [
+            'index' => $index
+        ];
 
-        if ($shards) {
-            $index['body']['settings']['number_of_shards'] = $shards;
-        }
+        return $client->indices()->delete($params);
+    }
 
-        if ($replicas) {
-            $index['body']['settings']['number_of_replicas'] = $replicas;
-        }
 
-        return $client->indices()->create($index);
+    /**
+     * Create Alias
+     *
+     * @param $name
+     * @param $index
+     * @return mixed
+     */
+    public static function createAlias($name, $index)
+    {
+        $instance = new static;
+
+        $client = $instance->getElasticSearchClient();
+
+        $params = [
+            'index' => $index,
+            'name' => $name,
+            'body' => [
+                'actions' => [
+                    [
+                        'add' => [
+                            'index' => $index,
+                            'alias' => $name
+                        ]
+                    ]
+                ]
+            ]
+        ];
+
+        return $client->indices()->putAlias($params);
+    }
+
+
+    /**
+     * Delete Alias
+     *
+     * @param $name
+     * @param $index
+     * @return mixed
+     */
+    public static function deleteAlias($name, $index)
+    {
+        $instance = new static;
+        $client = $instance->getElasticSearchClient();
+
+        $params = [
+            'index' => $index,
+            'name' => $name
+        ];
+
+        return $client->indices()->deleteAlias($params);
+    }
+
+    /**
+     * Get a list of all aliases
+     *
+     * @return mixed
+     */
+    public static function getAliases()
+    {
+        $instance = new static;
+        $client = $instance->getElasticSearchClient();
+
+        return $client->indices()->getAliases();
+    }
+
+
+    /**
+     * Update Alias
+     *
+     * @param $name
+     * @param $index
+     */
+    public static function updateAlias($name, $index) {
+        $instance = new static;
+        $client = $instance->getElasticSearchClient();
+
+        $old_index = $instance->getIndex($name);
+        $instance->deleteAlias($name, $old_index);
+        $instance->createAlias($name, $index);
     }
 
     /**

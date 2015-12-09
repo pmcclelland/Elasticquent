@@ -21,6 +21,7 @@
     "illuminate/support": "~5.0",
     "illuminate/database": "~5.0",
     "nesbot/carbon": "~1.0",
+    "monolog/monolog": "~1.0",
     "elasticsearch/elasticsearch": "~2.0"
   },
   "require-dev": {
