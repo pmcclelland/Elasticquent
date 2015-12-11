@@ -1,5 +1,7 @@
 # Elasticquent Beta
 
+[![Join the chat at https://gitter.im/pmcclelland/Elasticquent](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/pmcclelland/Elasticquent?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 _Elasticsearch for Eloquent Laravel Models_
 
 Elasticquent makes working with [Elasticsearch](http://www.elasticsearch.org/) and [Eloquent](http://laravel.com/docs/eloquent) models easier by mapping them to Elasticsearch types. You can use the default settings or define how Elasticsearch should index and search your Eloquent models right in the model.
