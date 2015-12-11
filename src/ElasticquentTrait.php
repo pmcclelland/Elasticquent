@@ -207,6 +207,23 @@ trait ElasticquentTrait
     }
 
     /**
+     * Check if indices exist
+     *
+     * @param $indices
+     * @return mixed
+     */
+    public static function indexExists($indices)
+    {
+        $instance = new static;
+
+        $params = [
+            'index' => $indices
+        ];
+
+        return $instance->getElasticSearchClient()->indices()->exists($params);
+    }
+
+    /**
      * Index Documents
      *
      * Index all documents in an Eloquent model.
@@ -309,6 +326,8 @@ trait ElasticquentTrait
                 unset($includeFields[$value]);
             }
         }
+
+        dd($includeFields);
 
         // Get our document body data.
         $params['body'] = $includeFields;
@@ -513,7 +532,13 @@ trait ElasticquentTrait
             'index' => $alias
         ];
 
-        return collect($client->indices()->get($params))->keys()[0];
+        try {
+            $index = collect($client->indices()->get($params))->keys()[0];
+        } catch (Exception $exception) {
+            $index = '';
+        }
+
+        return $index;
     }
 
     /**
